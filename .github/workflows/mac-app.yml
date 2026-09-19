@@ -27,9 +27,11 @@ jobs:
         with:
           key: mac-app-arm64
 
+      # Every target compiles (the example and app tests read skins too);
+      # only the tests around the change run.
       - name: Skin and playlist text tests
         run: |
-          cargo test --locked --lib -- 'skin::' 'ui::winamp::pixel_text::'
+          cargo test --locked --all-targets -- 'skin::' 'pixel_text::'
 
       - name: Release build
         run: cargo build --release --locked --target aarch64-apple-darwin

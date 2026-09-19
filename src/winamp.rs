@@ -120,7 +120,8 @@ pub struct WinampState {
 pub const HIRES_TEXTURE: egui::TextureOptions = egui::TextureOptions {
     magnification: egui::TextureFilter::Nearest,
     minification: egui::TextureFilter::Linear,
-    ..egui::TextureOptions::NEAREST
+    wrap_mode: egui::TextureWrapMode::ClampToEdge,
+    mipmap_mode: None,
 };
 
 impl WinampState {
