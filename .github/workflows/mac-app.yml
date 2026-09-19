@@ -28,7 +28,8 @@ jobs:
           key: mac-app-arm64
 
       - name: Skin and playlist text tests
-        run: cargo test --locked --lib -- skin:: ui::winamp::pixel_text::
+        run: |
+          cargo test --locked --lib -- 'skin::' 'ui::winamp::pixel_text::'
 
       - name: Release build
         run: cargo build --release --locked --target aarch64-apple-darwin
