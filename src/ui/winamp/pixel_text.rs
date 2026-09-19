@@ -164,7 +164,7 @@ impl PixelText {
                 _ => (0, height as u32),
             };
             let options = if scale > 1 {
-                TextureOptions::LINEAR
+                crate::winamp::HIRES_TEXTURE
             } else {
                 TextureOptions::NEAREST
             };

@@ -111,6 +111,18 @@ pub struct WinampState {
     pub presets: crate::milkdrop::Presets,
 }
 
+/// How a high-resolution sheet is sampled. Classic sheets keep their
+/// pixels square with nearest sampling both ways. A `@4x` sheet lands near
+/// one bitmap pixel per screen pixel at the default size, where nearest
+/// magnification stays crisp whatever the window's sub-pixel offset; drawn
+/// smaller than that, linear minification averages the rows that nearest
+/// would drop unevenly.
+pub const HIRES_TEXTURE: egui::TextureOptions = egui::TextureOptions {
+    magnification: egui::TextureFilter::Nearest,
+    minification: egui::TextureFilter::Linear,
+    ..egui::TextureOptions::NEAREST
+};
+
 impl WinampState {
     pub fn new(restore_pos: Option<[f32; 2]>, tap: Arc<AudioTap>, eq: crate::eq::SharedEq) -> Self {
         Self {
@@ -185,11 +197,8 @@ impl WinampState {
                 [bitmap.width as usize, bitmap.height as usize],
                 &bitmap.rgba,
             );
-            // Classic sheets keep their pixels square. A high-resolution
-            // sheet is drawn near one bitmap pixel per screen pixel, where
-            // nearest sampling would drop or double rows unevenly.
             let options = if self.skin.scale(sheet) > 1 {
-                egui::TextureOptions::LINEAR
+                HIRES_TEXTURE
             } else {
                 egui::TextureOptions::NEAREST
             };
