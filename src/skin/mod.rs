@@ -356,7 +356,7 @@ mod tests {
             assert!(skin.has(sheet), "{} is missing", sheet.file_stem());
         }
         for (name, sprite) in sprites::ALL {
-            let (_, clipped) = skin
+            let (_, clipped, _) = skin
                 .sprite(*sprite)
                 .unwrap_or_else(|| panic!("{name} is off the sheet"));
             assert_eq!(clipped, *sprite, "{name} is cut off");
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn the_built_in_skin_is_not_blank() {
         let skin = Skin::builtin();
-        let (bitmap, sprite) = skin.sprite(sprites::PLAY).unwrap();
+        let (bitmap, sprite, _) = skin.sprite(sprites::PLAY).unwrap();
         let glyph = bitmap.crop(sprite).unwrap();
         let distinct: std::collections::HashSet<[u8; 4]> = (0..glyph.height)
             .flat_map(|y| (0..glyph.width).map(move |x| (x, y)))
@@ -506,7 +506,7 @@ mod tests {
             ("volume.bmp", &png(68, 419, [2, 2, 2]), false),
         ]);
         let skin = Skin::from_archive("short", &archive).unwrap();
-        let (_, track) = skin.sprite(sprites::POSITION_TRACK).unwrap();
+        let (_, track, _) = skin.sprite(sprites::POSITION_TRACK).unwrap();
         assert_eq!((track.width, track.height), (248, 4));
         assert!(skin.sprite(sprites::VOLUME_THUMB).is_none());
         assert!(skin.sprite(sprites::volume_frame(27)).is_some());
