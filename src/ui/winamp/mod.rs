@@ -142,24 +142,27 @@ impl View<'_> {
     }
 
     fn paint(&self, painter: &egui::Painter, sprite: Sprite, x: u32, y: u32) {
-        let Some((bitmap, clipped)) = self.skin.sprite(sprite) else {
+        let Some((bitmap, clipped, scale)) = self.skin.sprite(sprite) else {
             return;
         };
         let Some(&texture) = self.textures.get(&sprite.sheet) else {
             return;
         };
+        // Skin pixels to texture coordinates: a high-resolution sheet holds
+        // `scale` bitmap pixels per skin pixel, drawn into the same area.
         let (width, height) = (bitmap.width as f32, bitmap.height as f32);
+        let scale = scale as f32;
         // A piece of the sprite, `dx` in and `columns` wide, on one row or
         // all of them.
         let piece = |dx: u32, dy: u32, columns: u32, rows: u32| {
             let uv = Rect::from_min_max(
                 pos2(
-                    (clipped.x + dx) as f32 / width,
-                    (clipped.y + dy) as f32 / height,
+                    (clipped.x + dx) as f32 * scale / width,
+                    (clipped.y + dy) as f32 * scale / height,
                 ),
                 pos2(
-                    (clipped.x + dx + columns) as f32 / width,
-                    (clipped.y + dy + rows) as f32 / height,
+                    (clipped.x + dx + columns) as f32 * scale / width,
+                    (clipped.y + dy + rows) as f32 * scale / height,
                 ),
             );
             let dest = Rect::from_min_size(

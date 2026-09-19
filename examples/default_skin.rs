@@ -819,7 +819,7 @@ fn viscolor_txt() -> String {
 fn preview(skin: &Skin) -> image::RgbaImage {
     let mut image = image::RgbaImage::new(layout::WINDOW_WIDTH, layout::WINDOW_HEIGHT);
     let mut blit = |sprite: Sprite, x: u32, y: u32| {
-        let Some((bitmap, sprite)) = skin.sprite(sprite) else {
+        let Some((bitmap, sprite, _)) = skin.sprite(sprite) else {
             return;
         };
         for dy in 0..sprite.height {

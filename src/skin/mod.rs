@@ -85,6 +85,10 @@ pub struct Skin {
     /// The file or folder name, for showing which skin is on.
     pub name: String,
     sheets: HashMap<Sheet, Bitmap>,
+    /// How many bitmap pixels stand for one skin pixel in each sheet: 1 for
+    /// a classic sheet, `n` for one loaded from `<stem>@<n>x.bmp`, a
+    /// high-resolution drawing of the same sprites. Sheets not listed are 1.
+    scales: HashMap<Sheet, u32>,
     pub playlist: PlaylistStyle,
     pub vis_colors: VisColors,
     /// The windows' shapes, for skins that are not rectangles.
@@ -159,8 +163,24 @@ impl Skin {
 
     fn from_files(name: String, files: Files) -> Result<Self, SkinError> {
         let mut sheets = HashMap::new();
+        let mut scales = HashMap::new();
         for sheet in Sheet::ALL {
             let stem = sheet.file_stem();
+            // A high-resolution sheet, `<stem>@<n>x`, is drawn at `n` times
+            // the classic size and wins over the classic one; Winamp itself
+            // never looks for it, so a skin can carry both.
+            let hires = (2..=MAX_SHEET_SCALE).rev().find_map(|n| {
+                files
+                    .get(&format!("{stem}@{n}x.bmp"))
+                    .or_else(|| files.get(&format!("{stem}@{n}x.png")))
+                    .and_then(|bytes| Bitmap::decode(bytes))
+                    .map(|bitmap| (bitmap, n))
+            });
+            if let Some((bitmap, n)) = hires {
+                sheets.insert(sheet, bitmap);
+                scales.insert(sheet, n);
+                continue;
+            }
             let bytes = files
                 .get(&format!("{stem}.bmp"))
                 .or_else(|| files.get(&format!("{stem}.png")));
@@ -202,6 +222,7 @@ impl Skin {
         Ok(Self {
             name,
             sheets,
+            scales,
             playlist,
             vis_colors,
             regions,
@@ -232,8 +253,19 @@ impl Skin {
     /// whichever digit sheet the skin has; anything else comes from the
     /// built-in skin.
     pub fn sheet(&self, sheet: Sheet) -> &Bitmap {
-        if let Some(bitmap) = self.sheets.get(&sheet) {
-            return bitmap;
+        self.resolve(sheet).0
+    }
+
+    /// Bitmap pixels per skin pixel in the sheet that stands for `sheet`.
+    pub fn scale(&self, sheet: Sheet) -> u32 {
+        self.resolve(sheet).1
+    }
+
+    /// The bitmap that stands for a sheet, with its scale: the skin's own
+    /// (or its substitute) and that sheet's factor, else the built-in's at 1.
+    fn resolve(&self, sheet: Sheet) -> (&Bitmap, u32) {
+        if let Some(found) = self.own(sheet) {
+            return found;
         }
         let substitute = match sheet {
             Sheet::Balance => Sheet::Volume,
@@ -241,24 +273,39 @@ impl Skin {
             Sheet::NumsEx => Sheet::Numbers,
             other => other,
         };
-        self.sheets
-            .get(&substitute)
-            .or_else(|| BUILTIN.sheets.get(&sheet))
-            .expect("the built-in skin has every sheet")
+        self.own(substitute).unwrap_or_else(|| {
+            let bitmap = BUILTIN
+                .sheets
+                .get(&sheet)
+                .expect("the built-in skin has every sheet");
+            (bitmap, 1)
+        })
     }
 
-    /// The bitmap holding a sprite and the part of it the bitmap covers,
-    /// or `None` when the sheet is too small to hold any of it. Winamp drew
-    /// whatever was there and nothing where nothing was.
-    pub fn sprite(&self, sprite: Sprite) -> Option<(&Bitmap, Sprite)> {
-        let bitmap = self.sheet(sprite.sheet);
-        let clipped = sprite.clipped_to(bitmap.width, bitmap.height)?;
-        Some((bitmap, clipped))
+    /// A sheet the skin brought itself, with its scale.
+    fn own(&self, sheet: Sheet) -> Option<(&Bitmap, u32)> {
+        let bitmap = self.sheets.get(&sheet)?;
+        Some((bitmap, self.scales.get(&sheet).copied().unwrap_or(1)))
+    }
+
+    /// The bitmap holding a sprite, the part of it the bitmap covers in
+    /// skin pixels, and the bitmap's scale, or `None` when the sheet is too
+    /// small to hold any of it. Winamp drew whatever was there and nothing
+    /// where nothing was. A scaled sheet covers `scale` bitmap pixels per
+    /// skin pixel, so its sprite rectangles are read at that multiple.
+    pub fn sprite(&self, sprite: Sprite) -> Option<(&Bitmap, Sprite, u32)> {
+        let (bitmap, scale) = self.resolve(sprite.sheet);
+        let clipped = sprite.clipped_to(bitmap.width / scale, bitmap.height / scale)?;
+        Some((bitmap, clipped, scale))
     }
 }
 
 /// Bound traversal of a selected unpacked skin folder.
 const MAX_SKIN_DEPTH: usize = 8;
+
+/// The largest `@<n>x` sheet looked for. 4x is one bitmap pixel per screen
+/// pixel at the default size on a Retina display.
+const MAX_SHEET_SCALE: u32 = 8;
 
 /// Whether a file inside a skin is one this reader looks at, so cursors,
 /// readmes, and the equalizer's bitmaps are never inflated.
@@ -272,6 +319,7 @@ fn wanted(file_name: &str) -> bool {
     let Some((stem, extension)) = file_name.rsplit_once('.') else {
         return false;
     };
+    let stem = stem.split_once('@').map_or(stem, |(stem, _)| stem);
     matches!(extension, "bmp" | "png") && Sheet::ALL.iter().any(|sheet| sheet.file_stem() == stem)
 }
 
@@ -321,7 +369,7 @@ mod tests {
             sprites::glyph(2, 30),
         ] {
             assert_eq!(
-                skin.sprite(sprite).map(|(_, clipped)| clipped),
+                skin.sprite(sprite).map(|(_, clipped, _)| clipped),
                 Some(sprite)
             );
         }
@@ -360,6 +408,37 @@ mod tests {
         assert_eq!(skin.playlist.normal, [0x12, 0x34, 0x56]);
         assert_eq!(skin.vis_colors[0], [9, 8, 7]);
         assert_eq!(skin.vis_colors[1], config::DEFAULT_VIS_COLORS[1]);
+    }
+
+    #[test]
+    fn a_high_resolution_sheet_wins_over_the_classic_one_and_keeps_its_scale() {
+        let archive = zip::write(&[
+            ("main.bmp", &png(275, 116, [1, 1, 1]), false),
+            ("main@2x.png", &png(550, 232, [2, 2, 2]), false),
+            ("cbuttons.bmp", &png(136, 36, [3, 3, 3]), false),
+            // Too small to be a real 4x sheet, but the label is trusted.
+            ("volume@4x.bmp", &png(272, 1732, [4, 4, 4]), false),
+        ]);
+        let skin = Skin::from_archive("hires", &archive).unwrap();
+        assert_eq!(skin.sheet(Sheet::Main).pixel(0, 0), Some([2, 2, 2, 255]));
+        assert_eq!(skin.scale(Sheet::Main), 2);
+        assert_eq!(skin.scale(Sheet::CButtons), 1);
+        assert_eq!(skin.scale(Sheet::Volume), 4);
+        // Balance borrows volume, scale and all; anything missing is the built-in at 1.
+        assert_eq!(skin.scale(Sheet::Balance), 4);
+        assert_eq!(skin.scale(Sheet::EqMain), 1);
+        // Sprites are still clipped in skin pixels, not bitmap pixels.
+        let (bitmap, clipped, scale) = skin.sprite(sprites::MAIN_BACKGROUND).unwrap();
+        assert_eq!((bitmap.width, bitmap.height), (550, 232));
+        assert_eq!((clipped.width, clipped.height, scale), (275, 116, 2));
+    }
+
+    #[test]
+    fn high_resolution_sheet_names_are_wanted() {
+        assert!(wanted("main@2x.bmp"));
+        assert!(wanted("eqmain@4x.png"));
+        assert!(!wanted("main@2x.jpg"));
+        assert!(!wanted("readme@2x.bmp"));
     }
 
     #[test]

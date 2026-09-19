@@ -2,6 +2,9 @@
 //!
 //! Each line is rasterized once at skin resolution with monochrome hinting and
 //! no anti-aliasing, then cached and nearest-neighbor scaled with the skin.
+//! A skin whose playlist sheet is high-resolution gets its text the same
+//! way: drawn `scale` times larger, anti-aliased, and smoothly scaled, so
+//! the rows are as crisp as the frame around them.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -50,13 +53,35 @@ struct Face {
 }
 
 /// Lines drawn so far, and the faces they are drawn with.
-#[derive(Default)]
 pub struct PixelText {
     lines: HashMap<String, Line>,
     faces: Vec<Face>,
+    /// Bitmap pixels per skin pixel in the lines, matching the skin's
+    /// playlist sheet: 1 draws Winamp's unsmoothed text.
+    scale: u32,
+}
+
+impl Default for PixelText {
+    fn default() -> Self {
+        Self {
+            lines: HashMap::new(),
+            faces: Vec::new(),
+            scale: 1,
+        }
+    }
 }
 
 impl PixelText {
+    /// Matches the lines to the skin's playlist sheet, dropping lines drawn
+    /// at another scale.
+    pub fn set_scale(&mut self, scale: u32) {
+        let scale = scale.max(1);
+        if scale != self.scale {
+            self.scale = scale;
+            self.lines.clear();
+        }
+    }
+
     /// Drops every texture, for when the window they belong to is gone.
     pub fn clear(&mut self) {
         self.lines.clear();
@@ -127,6 +152,7 @@ impl PixelText {
             self.lines.clear();
         }
         if !self.lines.contains_key(text) {
+            let scale = self.scale;
             let image = self.rasterise(text);
             let [width, height] = image.size;
             let inked: Vec<u32> = (0..height)
@@ -137,16 +163,22 @@ impl PixelText {
                 (Some(first), Some(last)) => (*first, last - first + 1),
                 _ => (0, height as u32),
             };
-            let texture =
-                ctx.load_texture(format!("pledit:{text}"), image, TextureOptions::NEAREST);
+            let options = if scale > 1 {
+                TextureOptions::LINEAR
+            } else {
+                TextureOptions::NEAREST
+            };
+            let texture = ctx.load_texture(format!("pledit:{text}"), image, options);
+            // Sizes are in skin pixels, whatever the bitmap's scale.
+            let skin = |pixels: u32| pixels.div_ceil(scale);
             self.lines.insert(
                 text.to_string(),
                 Line {
                     texture,
-                    width: width as u32,
-                    height: height as u32,
-                    ink_top,
-                    ink_height,
+                    width: skin(width as u32),
+                    height: skin(height as u32),
+                    ink_top: ink_top / scale,
+                    ink_height: skin(ink_height),
                 },
             );
         }
@@ -154,11 +186,15 @@ impl PixelText {
     }
 
     fn rasterise(&mut self, text: &str) -> ColorImage {
+        let scale = self.scale;
         let faces = self.faces();
         let Some(primary) = faces.first() else {
             return ColorImage::filled([1, 1], Color32::TRANSPARENT);
         };
-        let size = Size::new(SIZE_PX as f32);
+        // At 1 the hinting programme snaps stems to skin pixels, as Windows
+        // did; larger, the outlines are drawn as they are and smoothed.
+        let smooth = scale > 1;
+        let size = Size::new((SIZE_PX * scale) as f32);
         let location = LocationRef::default();
         let metrics = primary.font.metrics(size, location);
         let ascent = metrics.ascent.ceil();
@@ -179,8 +215,10 @@ impl PixelText {
             if let Some(outline) = face.font.outline_glyphs().get(glyph) {
                 let mut pen = Pen::new(x, ascent);
                 let drawn = match &face.hinting {
-                    Some(hinting) => outline.draw(DrawSettings::hinted(hinting, false), &mut pen),
-                    None => outline.draw(DrawSettings::unhinted(size, location), &mut pen),
+                    Some(hinting) if !smooth => {
+                        outline.draw(DrawSettings::hinted(hinting, false), &mut pen)
+                    }
+                    _ => outline.draw(DrawSettings::unhinted(size, location), &mut pen),
                 };
                 if let Ok(adjusted) = drawn
                     && let Some(hinted) = adjusted.advance_width
@@ -200,7 +238,7 @@ impl PixelText {
             return image;
         };
         let mut paint = tiny_skia::Paint {
-            anti_alias: false,
+            anti_alias: smooth,
             ..tiny_skia::Paint::default()
         };
         paint.set_color_rgba8(255, 255, 255, 255);
@@ -215,8 +253,17 @@ impl PixelText {
         }
         for y in 0..height {
             for x in 0..width {
-                if pixmap.pixel(x, y).is_some_and(|pixel| pixel.alpha() > 0) {
-                    image[(x as usize, y as usize)] = Color32::WHITE;
+                let Some(pixel) = pixmap.pixel(x, y) else {
+                    continue;
+                };
+                let alpha = pixel.alpha();
+                if alpha > 0 {
+                    // Ink is white at the coverage; the row's colour tints it.
+                    image[(x as usize, y as usize)] = if smooth {
+                        Color32::from_white_alpha(alpha)
+                    } else {
+                        Color32::WHITE
+                    };
                 }
             }
         }

@@ -11,7 +11,7 @@ use crate::api::models::PlayableItem;
 use crate::app::{App, NowPlaying};
 use crate::model::{Action, Page, RowContext};
 use crate::skin::layout::{self, Area};
-use crate::skin::sprites;
+use crate::skin::sprites::{self, Sheet};
 use crate::util;
 
 use super::View;
@@ -456,7 +456,9 @@ fn list(app: &mut App, view: &mut View, rows: &[Row], height: u32) {
         } else {
             style.normal
         });
+        let text_scale = view.skin.scale(Sheet::PlEdit);
         let text = &mut app.winamp.playlist_text;
+        text.set_scale(text_scale);
         let duration = util::format_duration_ms(row.duration_ms);
         let duration_width = text.width(&duration).ceil() as u32;
         let title_room = line.width.saturating_sub(3 * pad + duration_width);

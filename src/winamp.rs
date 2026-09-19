@@ -185,10 +185,18 @@ impl WinampState {
                 [bitmap.width as usize, bitmap.height as usize],
                 &bitmap.rgba,
             );
+            // Classic sheets keep their pixels square. A high-resolution
+            // sheet is drawn near one bitmap pixel per screen pixel, where
+            // nearest sampling would drop or double rows unevenly.
+            let options = if self.skin.scale(sheet) > 1 {
+                egui::TextureOptions::LINEAR
+            } else {
+                egui::TextureOptions::NEAREST
+            };
             let handle = ctx.load_texture(
                 format!("winamp-{}", sheet.file_stem()),
                 image,
-                egui::TextureOptions::NEAREST,
+                options,
             );
             self.textures.insert(sheet, handle);
         }

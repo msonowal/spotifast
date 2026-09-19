@@ -1,0 +1,48 @@
+# Builds an unsigned Spotifast.app for Apple Silicon from a branch, for
+# trying changes on a Mac without a local Rust toolchain. Fork-only: the
+# release workflow is what ships.
+name: macOS app from branch
+
+on:
+  push:
+    branches: [hidpi-skins]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos-arm64:
+    name: macOS arm64 app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mac-app-arm64
+
+      - name: Skin and playlist text tests
+        run: cargo test --locked --lib -- skin:: ui::winamp::pixel_text::
+
+      - name: Release build
+        run: cargo build --release --locked --target aarch64-apple-darwin
+
+      - name: App bundle
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')-hidpi.${GITHUB_RUN_NUMBER}"
+          mkdir -p dist
+          bash packaging/macos/bundle.sh target/aarch64-apple-darwin/release/fastpotify dist/Spotifast.app "$version"
+          cd dist && ditto -c -k --keepParent Spotifast.app "Spotifast-${version}-arm64.zip"
+          ls -la
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Spotifast-hidpi-macos-arm64
+          path: dist/*.zip
+          if-no-files-found: error
